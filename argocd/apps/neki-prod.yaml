@@ -8,7 +8,7 @@ metadata:
 spec:
   project: default
   source:
-    repoURL: https://github.com/YAPP-Github/27th-App-Team-2-BE-gitops.git
+    repoURL: https://github.com/Team-Neki/Team-Neki-GitOps.git
     targetRevision: main
     path: overlays/prod
   destination:
