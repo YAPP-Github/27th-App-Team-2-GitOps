@@ -83,6 +83,19 @@ spec:
           preStop:
             exec:
               command: ["/bin/sh", "-c", "sleep 10"]
+        # Firebase 서비스 계정 JSON을 Secret에서 파일로 마운트
+        # prod 프로파일에서 file:/etc/firebase/firebase-service-account.json 로 참조
+        volumeMounts:
+        - name: firebase-credentials
+          mountPath: /etc/firebase
+          readOnly: true
+      volumes:
+      - name: firebase-credentials
+        secret:
+          secretName: neki-secrets
+          items:
+          - key: firebase-service-account.json
+            path: firebase-service-account.json
       # 파드 종료 시 최대 대기 시간
       terminationGracePeriodSeconds: 30
 ---
