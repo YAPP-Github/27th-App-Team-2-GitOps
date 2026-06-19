@@ -192,6 +192,98 @@ data:
         options:
           path: /var/lib/grafana/dashboards
 ---
+# Grafana ConfigMap - Alerting Provisioning (Contact Point + Policy + Rule)
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-alerting
+  namespace: prod
+data:
+  # Discord 알림 채널 (웹훅 URL은 DISCORD_WEBHOOK_URL 환경변수에서 주입)
+  contactpoints.yaml: |
+    apiVersion: 1
+    contactPoints:
+      - orgId: 1
+        name: discord-prod
+        receivers:
+          - uid: discord_prod
+            type: discord
+            settings:
+              url: ${DISCORD_WEBHOOK_URL}
+              title: "🚨 [prod] neki-prod ERROR 발생"
+              message: |
+                {{ range .Alerts }}*{{ .Labels.alertname }}* — {{ .Annotations.summary }}
+                pod: `{{ .Labels.pod }}` / level: `{{ .Labels.level }}`
+                {{ end }}
+  # 모든 알림을 Discord로 라우팅
+  policies.yaml: |
+    apiVersion: 1
+    policies:
+      - orgId: 1
+        receiver: discord-prod
+        group_by: ['alertname', 'pod']
+        group_wait: 10s
+        group_interval: 1m
+        repeat_interval: 30m
+  # neki-prod ERROR 로그 1건이라도 발생 시 알림
+  rules.yaml: |
+    apiVersion: 1
+    groups:
+      - orgId: 1
+        name: neki-prod-error-logs
+        folder: neki-prod
+        interval: 1m
+        rules:
+          - uid: neki-prod-error-logs
+            title: neki-prod ERROR logs
+            condition: C
+            for: 0m
+            noDataState: OK
+            execErrState: OK
+            labels:
+              severity: critical
+            annotations:
+              summary: "최근 5분 내 prod neki-prod 파드에서 ERROR 로그가 감지됨"
+            data:
+              - refId: A
+                relativeTimeRange:
+                  from: 300
+                  to: 0
+                datasourceUid: loki
+                model:
+                  datasource:
+                    type: loki
+                    uid: loki
+                  expr: 'sum by (pod) (count_over_time({namespace="prod", level="ERROR"}[5m]))'
+                  queryType: instant
+                  refId: A
+              - refId: B
+                datasourceUid: __expr__
+                relativeTimeRange:
+                  from: 300
+                  to: 0
+                model:
+                  datasource:
+                    type: __expr__
+                    uid: __expr__
+                  type: reduce
+                  reducer: last
+                  expression: A
+                  refId: B
+              - refId: C
+                datasourceUid: __expr__
+                model:
+                  datasource:
+                    type: __expr__
+                    uid: __expr__
+                  type: threshold
+                  expression: B
+                  refId: C
+                  conditions:
+                    - evaluator:
+                        type: gt
+                        params: [0]
+---
 # Grafana Deployment
 apiVersion: apps/v1
 kind: Deployment
@@ -222,6 +314,12 @@ spec:
               value: "admin123"
             - name: GF_USERS_ALLOW_SIGN_UP
               value: "false"
+            # Discord 웹훅 URL (Secret으로 별도 관리, provisioning 파일에서 ${DISCORD_WEBHOOK_URL}로 참조)
+            - name: DISCORD_WEBHOOK_URL
+              valueFrom:
+                secretKeyRef:
+                  name: grafana-discord-webhook
+                  key: url
           resources:
             requests:
               memory: "128Mi"
@@ -234,6 +332,8 @@ spec:
               mountPath: /etc/grafana/provisioning/datasources
             - name: grafana-dashboard-provider
               mountPath: /etc/grafana/provisioning/dashboards
+            - name: grafana-alerting
+              mountPath: /etc/grafana/provisioning/alerting
             - name: grafana-dashboards
               mountPath: /var/lib/grafana/dashboards
             - name: grafana-storage
@@ -257,6 +357,9 @@ spec:
         - name: grafana-dashboard-provider
           configMap:
             name: grafana-dashboard-provider
+        - name: grafana-alerting
+          configMap:
+            name: grafana-alerting
         - name: grafana-dashboards
           configMap:
             name: grafana-dashboards
